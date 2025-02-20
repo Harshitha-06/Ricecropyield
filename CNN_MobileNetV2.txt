@@ -1,0 +1,352 @@
+import numpy as np 
+import pandas as pd 
+import tensorflow as tf
+from sklearn.metrics import confusion_matrix
+from tensorflow.keras import models, layers
+import matplotlib.pyplot as plt
+from IPython.display import HTML
+import os
+import warnings
+warnings.simplefilter('ignore')
+BATCH_SIZE = 20
+IMAGE_SIZE = 128
+CHANNELS=3
+EPOCHS=50
+dataset = tf.keras.preprocessing.image_dataset_from_directory(
+    r'C:/Users/Harshitha/Downloads/Extracted_Rice_Leaf_Disease_Images/Rice Leaf Disease Images',
+    image_size=(IMAGE_SIZE, IMAGE_SIZE),
+    batch_size=BATCH_SIZE
+)
+# Count the number of images (rows)
+num_rows = 0
+for batch in dataset:
+    num_rows += batch[0].shape[0]  # Adds the number of images in each batch
+
+# Count the number of classes (columns)
+num_cols = len(dataset.class_names)
+
+print(f"Number of rows (images): {num_rows}")
+print(f"Number of columns (classes): {num_cols}")
+
+from collections import Counter
+
+label_counts = Counter()
+for _, labels in dataset:
+    label_counts.update(labels.numpy())
+
+for class_index, count in label_counts.items():
+    print(f"{dataset.class_names[class_index]}: {count} images")
+
+for batch, labels in dataset:
+    if batch.shape[0] != len(labels):  # Checks if the batch and label counts match
+        print("Mismatch found in batch size and label count")
+    if any(label is None for label in labels):  # Checks for any None labels
+        print("Found a None label in the dataset")
+        
+print("No null and no inconsistent entries found in the dataset")
+
+for images, _ in dataset.take(1):
+    print(f"Image shape: {images[0].shape}")
+
+consistent_shape = True
+expected_shape = None
+
+for images, _ in dataset:
+    for image in images:
+        if expected_shape is None:
+            expected_shape = image.shape  # Set the expected shape from the first image
+        if image.shape != expected_shape:
+            print(f"Inconsistent shape found: {image.shape}")
+            consistent_shape = False
+            break
+    if not consistent_shape:
+        break
+
+if consistent_shape:
+    print(f"All images have a consistent shape: {expected_shape}")
+else:
+    print("There are images with inconsistent shapes.")
+
+import numpy as np
+
+pixel_values = []
+for images, _ in dataset.take(10):  # Adjust the number of batches for faster calculation
+    pixel_values.extend(images.numpy().ravel())
+print("Mean pixel value:", np.mean(pixel_values))
+print("Standard deviation of pixel values:", np.std(pixel_values))
+
+def get_dataset_partitions_tf(ds, train_split=0.8, val_split=0.1, test_split=0.1, shuffle=True, shuffle_size=10000):
+    assert (train_split + test_split + val_split) == 1
+
+    ds_size = len(ds)
+
+    if shuffle:
+        ds = ds.shuffle(shuffle_size, seed=12)
+
+    train_size = int(train_split * ds_size)
+    val_size = int(val_split * ds_size)
+
+    train_ds = ds.take(train_size)
+    val_ds = ds.skip(train_size).take(val_size)
+    test_ds = ds.skip(train_size).skip(val_size)
+
+    return train_ds, val_ds, test_ds
+train_ds, val_ds, test_ds = get_dataset_partitions_tf(dataset)
+class_names = dataset.class_names
+class_names
+plt.figure(figsize=(10,10))
+for images, labels in train_ds.take(1):
+    for i in range(9):
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype("uint8"))
+        plt.title(class_names[labels[i]])
+        plt.axis("off")
+model = tf.keras.Sequential(
+    [
+     tf.keras.layers.Rescaling(1./255),
+     tf.keras.layers.Conv2D(65, 3, activation="relu"),
+     tf.keras.layers.MaxPooling2D(),
+     tf.keras.layers.Conv2D(35, 3, activation="relu"),
+     tf.keras.layers.MaxPooling2D(),
+     tf.keras.layers.Conv2D(64, 3, activation="relu"),
+     tf.keras.layers.MaxPooling2D(),
+     tf.keras.layers.Flatten(),
+     tf.keras.layers.Dense(128, activation="relu"),
+     tf.keras.layers.Dense(6)
+    ]
+)
+model.compile(
+    optimizer='adam',
+    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    metrics=['accuracy']
+)
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    verbose=1,
+    epochs=7,
+)
+scores = model.evaluate(test_ds)
+model.summary()
+tf.keras.utils.plot_model(model, show_shapes=True)
+history
+history.params
+history.history.keys()
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+EPOCHS=7
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(range(EPOCHS), acc, label='Training Accuracy')
+plt.plot(range(EPOCHS), val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(1, 2, 2)
+plt.plot(range(EPOCHS), loss, label='Training Loss')
+plt.plot(range(EPOCHS), val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.show()
+import numpy
+
+plt.figure(figsize=(15,15))
+for images, labels in test_ds.take(1):
+    classifications = model(images)
+  #print(classifications)
+
+    for i in range(9):
+               
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype("uint8"))
+        index = numpy.argmax(classifications[i])
+        #print(index)
+        plt.title("Pred: " + class_names[index] + "\nReal: " + class_names[labels[i]])
+all_predicted_labels = []
+all_actual_labels = []
+
+for images, labels in test_ds:
+    classifications = model(images)
+    predicted_labels = [np.argmax(classification) for classification in classifications.numpy()]
+    all_predicted_labels.extend(predicted_labels)
+    all_actual_labels.extend(labels.numpy())
+
+# Create confusion matrix
+conf_matrix = confusion_matrix(all_actual_labels, all_predicted_labels)
+
+# Plot confusion matrix with numbers
+plt.figure(figsize=(10, 10))
+plt.imshow(conf_matrix, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Confusion matrix')
+#plt.colorbar()
+tick_marks = np.arange(len(class_names))
+plt.xticks(tick_marks, class_names, rotation=45)
+plt.yticks(tick_marks, class_names)
+plt.xlabel('Predicted label')
+plt.ylabel('True label')
+
+
+thresh = conf_matrix.max() / 2.
+for i in range(conf_matrix.shape[0]):
+    for j in range(conf_matrix.shape[1]):
+        plt.text(j, i, format(conf_matrix[i, j], 'd'),
+                 ha="center", va="center",
+                 color="white" if conf_matrix[i, j] > thresh else "black")
+
+plt.tight_layout()
+plt.show()
+from sklearn.metrics import classification_report
+
+report = classification_report(all_actual_labels, all_predicted_labels, target_names=class_names)
+
+print(report)
+
+
+
+#MobileNetV2 base model
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import classification_report, confusion_matrix
+import os
+from tensorflow.keras import mixed_precision
+mixed_precision.set_global_policy('mixed_float16')
+
+# Parameters
+BATCH_SIZE = 32
+IMAGE_SIZE = (128, 128)
+EPOCHS = 5
+DATASET_PATH = r'C:/Users/Harshitha/Downloads/Extracted_Rice_Leaf_Disease_Images/Rice Leaf Disease Images'
+# Load and preprocess the dataset
+dataset = image_dataset_from_directory(
+    DATASET_PATH,
+    image_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    label_mode='int'
+)
+
+class_names = dataset.class_names
+
+# Split the dataset
+def split_dataset(ds, train_split=0.8, val_split=0.1, test_split=0.1):
+    ds_size = len(ds)
+    train_size = int(train_split * ds_size)
+    val_size = int(val_split * ds_size)
+
+    train_ds = ds.take(train_size)
+    val_ds = ds.skip(train_size).take(val_size)
+    test_ds = ds.skip(train_size + val_size)
+
+    return train_ds, val_ds, test_ds
+
+train_ds, val_ds, test_ds = split_dataset(dataset)
+# Normalize pixel values
+normalization_layer = layers.Rescaling(1./255)
+train_ds = train_ds.map(lambda x, y: (normalization_layer(x), y))
+val_ds = val_ds.map(lambda x, y: (normalization_layer(x), y))
+test_ds = test_ds.map(lambda x, y: (normalization_layer(x), y))
+
+from tensorflow.keras.applications import MobileNetV2
+
+
+# Load MobileNetV2 base model
+base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(IMAGE_SIZE[0], IMAGE_SIZE[1], 3))
+
+# Freeze the base model
+base_model.trainable = False
+
+# Add custom classification layers
+model = models.Sequential([
+    base_model,
+    layers.Flatten(),
+    layers.Dense(256, activation='relu'),
+    layers.Dropout(0.5),
+    layers.Dense(len(class_names), activation='softmax')
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+# Train the model
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=EPOCHS
+)
+
+# Evaluate the model
+test_loss, test_accuracy = model.evaluate(test_ds)
+print(f"Test accuracy: {test_accuracy}")
+
+# Display a summary of the model
+model.summary()
+
+# Generate classification report and confusion matrix
+all_predicted_labels = []
+all_actual_labels = []
+
+for images, labels in test_ds:
+    predictions = model.predict(images)
+    predicted_labels = np.argmax(predictions, axis=1)
+    all_predicted_labels.extend(predicted_labels)
+    all_actual_labels.extend(labels.numpy())
+
+# Confusion matrix
+conf_matrix = confusion_matrix(all_actual_labels, all_predicted_labels)
+print("Confusion Matrix:\n", conf_matrix)
+
+# Classification report
+report = classification_report(all_actual_labels, all_predicted_labels, target_names=class_names)
+print("Classification Report:\n", report)
+# Plot accuracy and loss
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(range(EPOCHS), acc, label='Training Accuracy')
+plt.plot(range(EPOCHS), val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(1, 2, 2)
+plt.plot(range(EPOCHS), loss, label='Training Loss')
+plt.plot(range(EPOCHS), val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.show()
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Function to display sample images with actual and predicted labels
+def display_actual_vs_predicted(model, dataset, class_names, num_images=5):
+    plt.figure(figsize=(15, 15))
+
+    # Fetch one batch of data from the test dataset
+    for images, labels in dataset.take(1):
+        predictions = model.predict(images)  # Predict on the batch
+        predicted_labels = np.argmax(predictions, axis=1)
+        
+        # Display a sample of images with their actual and predicted labels
+        for i in range(min(num_images, len(images))):
+            plt.subplot(1, num_images, i + 1)
+            img = images[i].numpy()  # Convert to numpy array
+            img = np.clip(img * 255, 0, 255).astype('uint8')  # Convert back to original pixel range
+            plt.imshow(img)
+            actual_label = class_names[labels[i].numpy()]
+            predicted_label = class_names[predicted_labels[i]]
+            plt.title(f"Actual: {actual_label}\nPredicted: {predicted_label}")
+            plt.axis('off')
+    
+    plt.show()
+
+# Display sample of actual vs predicted images from the test dataset
+display_actual_vs_predicted(model, test_ds, class_names, num_images=5)
